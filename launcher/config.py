@@ -11,13 +11,19 @@ CONFIG_DIR = PROJECT_ROOT / 'config'
 SCRIPTS_DIR = PROJECT_ROOT / 'scripts'
 
 GODOT_PROJECT = GODOT_DIR
+# Lane-detection maps: (1) basic lane follow, (2) lane follow + obstacles
+_LANE_FOLLOWER_SCENE = 'res://scenes/maps/lane_follower.tscn'
+_LANE_DETECT_SCENE = 'res://scenes/maps/lane_detect.tscn'
 GODOT_SCENES = {
     'braitenberg': 'res://scenes/braitenberg.tscn',
-    'visual_lane_servoing': 'res://scenes/maps/lane_follower.tscn',
+    'visual_lane_servoing': _LANE_FOLLOWER_SCENE,
+    'lane_follower': _LANE_FOLLOWER_SCENE,
+    'lane_detect': _LANE_DETECT_SCENE,
     'introduction': 'res://scenes/maps/introduction.tscn',
     'modcon': 'res://scenes/maps/Modconpath.tscn',
     'navigator': 'res://scenes/maps/map_follower.tscn',
-    'object_detection': 'res://scenes/maps/lane_detect.tscn',
+    'object_detection': _LANE_DETECT_SCENE,
+    'passing': 'res://scenes/maps/passing.tscn',
 }
 
 DEFAULT_WEB_PORT = 5000

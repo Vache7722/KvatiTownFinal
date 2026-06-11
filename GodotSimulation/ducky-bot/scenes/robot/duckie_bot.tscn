@@ -17,7 +17,7 @@ script = ExtResource("1_fko8c")
 transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
 
 [node name="BotCameraViewport" type="SubViewport" parent="." unique_id=1871592123]
-size = Vector2i(640, 480)
+size = Vector2i(960, 720)
 render_target_update_mode = 4
 
 [node name="BotCamera" type="Camera3D" parent="BotCameraViewport" unique_id=2016536588]

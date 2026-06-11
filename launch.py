@@ -12,14 +12,59 @@ import zipfile
 import stat
 from pathlib import Path
 
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
+
+_VENV_PYTHON = os.path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
+_SUPPORTED_PYTHON = (3, 12)
+
+
+def _ensure_supported_python():
+    """Fail fast when the launcher is run with an unsupported interpreter."""
+    if sys.version_info[:2] != _SUPPORTED_PYTHON:
+        print('\n' + '=' * 60)
+        print('UNSUPPORTED PYTHON VERSION')
+        print('=' * 60)
+        print(f'  Current: Python {sys.version_info.major}.{sys.version_info.minor}')
+        print(f'  Required: Python {_SUPPORTED_PYTHON[0]}.{_SUPPORTED_PYTHON[1]}')
+        if os.path.isfile(_VENV_PYTHON):
+            print('\nUse the project virtual environment instead:')
+            print('  .venv\\Scripts\\activate')
+            print('  python launch.py --sim --task <task>')
+            print('\nOr run directly:')
+            print(f'  {_VENV_PYTHON} launch.py --sim --task <task>')
+        else:
+            print('\nCreate the virtual environment first (do NOT use plain python -m venv):')
+            print('  .\\setup_venv.ps1')
+            print('  or:  py -3.12 -m venv .venv  &&  .venv\\Scripts\\pip install -r requirements.txt')
+        print('=' * 60 + '\n')
+        return 1
+
+    try:
+        import numpy  # noqa: F401
+        import cv2  # noqa: F401
+    except ImportError as exc:
+        print('\n' + '=' * 60)
+        print('MISSING OR BROKEN DEPENDENCIES')
+        print('=' * 60)
+        print(f'  {exc}')
+        print('\nReinstall requirements in the project venv:')
+        print('  .venv\\Scripts\\activate')
+        print('  pip install -r requirements.txt')
+        print('=' * 60 + '\n')
+        return 1
+
+    return 0
+
+
+if _ensure_supported_python() != 0:
+    sys.exit(1)
+
 import requests
 
 from launcher.ports import find_available_port, wait_for_port_file
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, PROJECT_ROOT)
 
 GODOT_PROJECT = os.path.join(PROJECT_ROOT, 'GodotSimulation', 'ducky-bot')
 from launcher.config import GODOT_SCENES

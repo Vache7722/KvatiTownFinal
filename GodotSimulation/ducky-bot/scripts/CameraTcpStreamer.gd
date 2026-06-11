@@ -6,7 +6,7 @@ extends Node
 @export var target_fps: float = 30.0
 @export var resize_width: int = 0
 @export var resize_height: int = 0
-@export var jpeg_quality: float = 0.75
+@export var jpeg_quality: float = 0.92
 
 var _tcp: StreamPeerTCP = StreamPeerTCP.new()
 var _accum: float = 0.0
