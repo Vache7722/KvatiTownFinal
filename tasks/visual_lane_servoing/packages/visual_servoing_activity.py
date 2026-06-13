@@ -18,7 +18,46 @@ _white_lower = np.array([_h.get('white_lower_h', 0),   _h.get('white_lower_s', 0
 _white_upper = np.array([_h.get('white_upper_h', 0), _h.get('white_upper_s', 0), _h.get('white_upper_v', 0)])
 
 def detect_lane_markings(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    raise NotImplementedError("TODO: Implement this function")
+    """Return binary masks (0/1 float) for yellow-left and white-right lane markings."""
+    h, w = image.shape[:2]
+
+    mask_ground = np.zeros((h, w), dtype=np.float32)
+    mask_ground[int(h * 0.35):, :] = 1.0
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask_yellow = cv2.inRange(hsv, _yellow_lower, _yellow_upper).astype(np.float32) / 255.0
+    mask_white = cv2.inRange(hsv, _white_lower, _white_upper).astype(np.float32) / 255.0
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (0, 0), 2)
+    sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0)
+    sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1)
+    gmag = np.sqrt(sobelx * sobelx + sobely * sobely)
+
+    ground_vals = gmag[mask_ground > 0]
+    threshold = float(np.percentile(ground_vals, 85)) if ground_vals.size else 30.0
+    mask_mag = (gmag > max(threshold, 15.0)).astype(np.float32)
+
+    mid = w // 2
+    mask_left_half = np.zeros((h, w), dtype=np.float32)
+    mask_left_half[:, :mid] = 1.0
+    mask_right_half = np.zeros((h, w), dtype=np.float32)
+    mask_right_half[:, mid:] = 1.0
+
+    mask_sobelx_neg = (sobelx < 0).astype(np.float32)
+    mask_sobelx_pos = (sobelx > 0).astype(np.float32)
+    mask_sobely_neg = (sobely < 0).astype(np.float32)
+
+    mask_left = (
+        mask_ground * mask_left_half * mask_mag
+        * mask_sobelx_neg * mask_sobely_neg * mask_yellow
+    )
+    mask_right = (
+        mask_ground * mask_right_half * mask_mag
+        * mask_sobelx_pos * mask_sobely_neg * mask_white
+    )
+
+    return mask_left, mask_right
 
 
 
