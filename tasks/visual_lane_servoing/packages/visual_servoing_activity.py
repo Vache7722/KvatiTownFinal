@@ -11,53 +11,56 @@ try:
 except FileNotFoundError:
     _h = {}
 
-_yellow_lower = np.array([_h.get('yellow_lower_h', 0),  _h.get('yellow_lower_s', 0),  _h.get('yellow_lower_v', 0)])
-_yellow_upper = np.array([_h.get('yellow_upper_h', 0),  _h.get('yellow_upper_s', 0), _h.get('yellow_upper_v', 0)])
+# Defaults work on the sim track and the real one: the real track's yellow
+# dashes lean orange (lower hue) and its white edge line is far dimmer
+# indoors than the sim's V>=200, especially in shadow.
+_YELLOW_DEFAULT = (np.array([15,  70,  90]), np.array([40, 255, 255]))
+_WHITE_DEFAULT  = (np.array([ 0,   0, 150]), np.array([179, 80, 255]))
 
-_white_lower = np.array([_h.get('white_lower_h', 0),   _h.get('white_lower_s', 0), _h.get('white_lower_v', 0)])
-_white_upper = np.array([_h.get('white_upper_h', 0), _h.get('white_upper_s', 0), _h.get('white_upper_v', 0)])
+_yellow_lower = np.array([_h.get('yellow_lower_h', 15),  _h.get('yellow_lower_s', 70),  _h.get('yellow_lower_v', 90)])
+_yellow_upper = np.array([_h.get('yellow_upper_h', 40),  _h.get('yellow_upper_s', 255), _h.get('yellow_upper_v', 255)])
 
-def detect_lane_markings(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Return binary masks (0/1 float) for yellow-left and white-right lane markings."""
-    h, w = image.shape[:2]
+_white_lower = np.array([_h.get('white_lower_h', 0),   _h.get('white_lower_s', 0),  _h.get('white_lower_v', 150)])
+_white_upper = np.array([_h.get('white_upper_h', 179), _h.get('white_upper_s', 80), _h.get('white_upper_v', 255)])
 
-    mask_ground = np.zeros((h, w), dtype=np.float32)
-    mask_ground[int(h * 0.35):, :] = 1.0
 
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    mask_yellow = cv2.inRange(hsv, _yellow_lower, _yellow_upper).astype(np.float32) / 255.0
-    mask_white = cv2.inRange(hsv, _white_lower, _white_upper).astype(np.float32) / 255.0
+def _valid(lower, upper):
+    return all(int(u) >= int(l) for l, u in zip(lower, upper)) and int(upper[2]) > 0
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (0, 0), 2)
-    sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0)
-    sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1)
-    gmag = np.sqrt(sobelx * sobelx + sobely * sobely)
 
-    ground_vals = gmag[mask_ground > 0]
-    threshold = float(np.percentile(ground_vals, 85)) if ground_vals.size else 30.0
-    mask_mag = (gmag > max(threshold, 15.0)).astype(np.float32)
+def detect_lane_markings(image):
 
-    mid = w // 2
-    mask_left_half = np.zeros((h, w), dtype=np.float32)
-    mask_left_half[:, :mid] = 1.0
-    mask_right_half = np.zeros((h, w), dtype=np.float32)
-    mask_right_half[:, mid:] = 1.0
+    blurred = cv2.GaussianBlur(image, (5,5), 1.5)
+    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-    mask_sobelx_neg = (sobelx < 0).astype(np.float32)
-    mask_sobelx_pos = (sobelx > 0).astype(np.float32)
-    mask_sobely_neg = (sobely < 0).astype(np.float32)
+    yellow_lower, yellow_upper = ((_yellow_lower, _yellow_upper)
+                                  if _valid(_yellow_lower, _yellow_upper)
+                                  else _YELLOW_DEFAULT)
+    white_lower, white_upper = ((_white_lower, _white_upper)
+                                if _valid(_white_lower, _white_upper)
+                                else _WHITE_DEFAULT)
 
-    mask_left = (
-        mask_ground * mask_left_half * mask_mag
-        * mask_sobelx_neg * mask_sobely_neg * mask_yellow
-    )
-    mask_right = (
-        mask_ground * mask_right_half * mask_mag
-        * mask_sobelx_pos * mask_sobely_neg * mask_white
-    )
+    mask_yellow = cv2.inRange(hsv, yellow_lower, yellow_upper)
+    mask_white = cv2.inRange(hsv, white_lower, white_upper)
 
-    return mask_left, mask_right
+    h, w = mask_yellow.shape
+
+    # ROI (bottom half)
+    mask_yellow[:int(h*0.5), :] = 0
+    mask_white[:int(h*0.5), :] = 0
+
+    # Left/right bias. The windows overlap in the middle: in a tight right
+    # turn the yellow center line sweeps well past the frame midline, and
+    # cutting it there loses the line exactly when steering needs it most.
+    mask_yellow[:, int(w*0.75):] = 0
+    mask_white[:, :int(w*0.35)] = 0
+
+    # Thicken lines
+    kernel = np.ones((7,7), np.uint8)
+    mask_yellow = cv2.dilate(mask_yellow, kernel)
+    mask_white = cv2.dilate(mask_white, kernel)
+
+    return (mask_yellow > 0).astype(np.uint8), (mask_white > 0).astype(np.uint8)
 
 
 

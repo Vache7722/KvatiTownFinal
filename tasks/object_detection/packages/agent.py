@@ -18,7 +18,7 @@ _CONFIG_FILE = os.path.normpath(os.path.join(
 _PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 CLASS_NAMES  = {0: 'duckie', 1: 'truck', 2: 'sign'}
-CLASS_COLORS = {0: (0, 215, 255), 1: (180, 100, 220), 2: (50, 205, 50)}
+CLASS_COLORS = {0: (0, 165, 255), 1: (180, 100, 220), 2: (50, 205, 50)}
 
 Detection = Tuple[Tuple[int, int, int, int], float, int]
 

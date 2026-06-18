@@ -59,16 +59,19 @@ class LaneServoingAgent:
         self.base_speed          = cfg.get('base_speed',          0.2)
         self.curve_speed         = cfg.get('curve_speed',         0.2)
         self.curve_threshold     = cfg.get('curve_threshold',     350)
-        self.steering_threshold  = cfg.get('steering_threshold',  0.2)
         self.curve_boost         = cfg.get('curve_boost',         1.3)
+        self.curve_hold_frames   = cfg.get('curve_hold_frames',   6)
         self.detection_threshold = cfg.get('detection_threshold', 500)
 
         self.frame_count        = 0
+        self._speed             = self.base_speed
         self._prev_error        = 0.0
         self._filtered_error    = 0.0
+        self._last_raw_error    = 0.0
         self._lane_half_width   = float(_LINE_OFFSET)
         self._left_history      = deque(maxlen=3)
         self._right_history     = deque(maxlen=3)
+        self._curve_hold        = 0
         self.last_debug_info    = self._empty_debug_info(480, 640)
 
     def _calculate_error(self, yellow_xs, white_xs, left_det, right_det, w):
@@ -84,38 +87,52 @@ class LaneServoingAgent:
         elif right_det and white_xs:
             error = w / 2.0 - (float(np.mean(white_xs)) - self._lane_half_width)
         else:
-            error = self._prev_error
+            # Lines briefly lost (typically mid-corner): keep steering with the
+            # last real measurement instead of letting the error decay to zero,
+            # which would straighten the robot out of the turn.
+            return self._last_raw_error
 
-        return float(np.clip(error / (w / 2.0), -1.0, 1.0))
+        error = float(np.clip(error / (w / 2.0), -1.0, 1.0))
+        self._last_raw_error = error
+        return error
 
-    def _calculate_steering(self, error: float) -> float:
+    def _calculate_steering(self, error: float, is_curve: bool) -> float:
         error_diff       = error - self._prev_error
         self._prev_error = error
-        steering = self.p_gain * error + self.d_gain * error_diff
-        return float(np.clip(steering, -self.max_steer, self.max_steer))
+        p = self.p_gain * error
+        d = self.d_gain * error_diff
+        if is_curve:
+            # More P authority in corners, but damp D: the lighter error
+            # filter used on curves makes the frame-to-frame diff noisy,
+            # and amplifying that shakes the robot through the turn.
+            p *= self.curve_boost
+            d *= 0.5
+        return float(np.clip(p + d, -self.max_steer, self.max_steer))
 
     def _motor_commands(self, steering: float, recovery: bool, is_curve: bool, both_visible: bool):
         if recovery:
             return 0.0, 0.0
 
-        speed = self.curve_speed if is_curve else self.base_speed
-        
+        target = self.curve_speed if is_curve else self.base_speed
         if not both_visible:
-            speed *= 0.8
+            target *= 0.8
+        # Asymmetric ramp: brake for a corner immediately (entering fast is
+        # how the robot runs wide), but accelerate smoothly — the curve flag
+        # flickers at corner boundaries and hard speed-up steps mid-turn are
+        # what shakes the robot.
+        if target < self._speed:
+            self._speed = target
+        else:
+            self._speed = 0.75 * self._speed + 0.25 * target
 
-        left  = speed - steering
-        right = speed + steering
-
-        if is_curve and abs(steering) > self.steering_threshold:
-            if steering > 0:
-                right *= 5
-            else:
-                left  *= self.curve_boost
-
+        left  = self._speed - steering
+        right = self._speed + steering
         return float(np.clip(left, 0.0, 1.0)), float(np.clip(right, 0.0, 1.0))
 
-    def _smooth(self, left, right, both_visible):
-        buf = 2 if both_visible else 1
+    def _smooth(self, left, right, is_curve, both_visible):
+        # Smoothing trades twitchiness for lag; in a chicane the lag is what
+        # drives the robot off the road, so curves get raw commands.
+        buf = 1 if is_curve else (2 if both_visible else 1)
         if self._left_history.maxlen != buf:
             self._left_history  = deque(maxlen=buf)
             self._right_history = deque(maxlen=buf)
@@ -160,13 +177,24 @@ class LaneServoingAgent:
 
         yellow_xs, white_xs = detect_lines_in_slices(mask_y, mask_w, h)
         both_visible        = left_det and right_det and not recovery
-        is_curve, curve_dir = detect_curve(yellow_xs, white_xs, self.curve_threshold)
+        curve_now, curve_dir = detect_curve(yellow_xs, white_xs, self.curve_threshold)
 
-        raw_error            = self._calculate_error(yellow_xs, white_xs, left_det, right_det, w)
-        self._filtered_error = 0.7 * self._filtered_error + 0.3 * raw_error
-        steering             = self._calculate_steering(self._filtered_error)
+        # Hold the curve verdict for a few frames: in the middle of a corner
+        # the lines can momentarily read straight (or vanish), and dropping
+        # back to full speed there is exactly the chicane failure mode.
+        if curve_now:
+            self._curve_hold = self.curve_hold_frames
+        else:
+            self._curve_hold = max(0, self._curve_hold - 1)
+        is_curve = self._curve_hold > 0
+
+        raw_error = self._calculate_error(yellow_xs, white_xs, left_det, right_det, w)
+        # Less filtering in corners: responsiveness matters more than jitter.
+        alpha = 0.45 if is_curve else 0.7
+        self._filtered_error = alpha * self._filtered_error + (1.0 - alpha) * raw_error
+        steering             = self._calculate_steering(self._filtered_error, is_curve)
         left, right          = self._motor_commands(steering, recovery, is_curve, both_visible)
-        left, right          = self._smooth(left, right, both_visible)
+        left, right          = self._smooth(left, right, is_curve, both_visible)
 
         slice_height = int(h * 0.35 / _NUM_SLICES)
         start_y      = int(h * _ROI_START)
