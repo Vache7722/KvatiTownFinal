@@ -1,0 +1,74 @@
+[gd_scene format=3 uid="uid://cw3vqap8xkn4m"]
+
+[ext_resource type="PackedScene" uid="uid://by8pqr474iaqj" path="res://scenes/duckie_bot.tscn" id="1_bot"]
+[ext_resource type="Script" uid="uid://clcwdvyof1tge" path="res://scripts/TopViewFollow.gd" id="2_topview"]
+[ext_resource type="Texture2D" uid="uid://ctpxnl5i08jgn" path="res://textures/leafy_grass_diff_4k.png" id="3_grass"]
+[ext_resource type="Texture2D" uid="uid://dmarl4bfd7bia" path="res://textures/leafy_grass_nor_gl_4k.png" id="4_grassnor"]
+[ext_resource type="PackedScene" uid="uid://b1lggcp0myfk2" path="res://models/lane_follower.glb" id="5_map"]
+[ext_resource type="PackedScene" uid="uid://cghelvr8fx5bv" path="res://models/VehicleCorected.glb" id="6_vehicle"]
+[ext_resource type="Script" path="res://scripts/ConstantMover.gd" id="7_mover"]
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_pass1"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_pass1"]
+sky_top_color = Color(0.27745807, 0.6367754, 0.897324, 1)
+sky_horizon_color = Color(0.6430557, 0.81513584, 0.92623365, 1)
+
+[sub_resource type="Sky" id="Sky_pass1"]
+sky_material = SubResource("ProceduralSkyMaterial_pass1")
+process_mode = 2
+
+[sub_resource type="Environment" id="Environment_pass1"]
+background_mode = 2
+sky = SubResource("Sky_pass1")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pass1"]
+albedo_color = Color(0.14695662, 0.23146757, 0.031017188, 1)
+albedo_texture = ExtResource("3_grass")
+normal_enabled = true
+normal_texture = ExtResource("4_grassnor")
+uv1_scale = Vector3(60, 60, 60)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_pass1"]
+
+[node name="passing" type="Node3D"]
+
+[node name="DuckieBot" parent="." instance=ExtResource("1_bot")]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 3.622817, 0.047902994, 3.683652)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.0074698986, 0.9999721, 0, -0.9999721, 0.0074698986, -1.0819607, 10.15756, 0)
+
+[node name="Terrain" type="Node3D" parent="."]
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Terrain"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Terrain/StaticBody3D"]
+shape = SubResource("WorldBoundaryShape3D_pass1")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_pass1")
+
+[node name="TopView" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -0.006562349, 0.9999785, 0, -0.9999785, -0.006562349, 4.1725354, 0.919008, 5.3346515)
+script = ExtResource("2_topview")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(10.057154, 0, 0, 0, 10.057154, 0, 0, 0, 10.057154, 4.5697584, 0.00669533, -0.9157721)
+material_override = SubResource("StandardMaterial3D_pass1")
+mesh = SubResource("PlaneMesh_pass1")
+
+[node name="lanefollower" parent="." instance=ExtResource("5_map")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.1735616, 0.014968276, 5.171497)
+
+[node name="ParkedBot" parent="." instance=ExtResource("6_vehicle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.62, 0.046961177, 4.25)
+
+[node name="MovingBot" type="Node3D" parent="."]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 4.8, 0.046961177, 5.32)
+script = ExtResource("7_mover")
+speed = 0.08
+waypoints = PackedVector3Array(6.3, 0.047, 5.32, 6.3, 0.047, 3.81, 5.07, 0.047, 3.81, 5.07, 0.047, 3.22, 3.62, 0.047, 3.22, 3.62, 0.047, 3.85, 3.86, 0.047, 4.05, 3.86, 0.047, 4.48, 3.62, 0.047, 4.68, 3.62, 0.047, 5.32)
+
+[node name="VehicleCorected" parent="MovingBot" instance=ExtResource("6_vehicle")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
