@@ -12,59 +12,14 @@ import zipfile
 import stat
 from pathlib import Path
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, PROJECT_ROOT)
-
-_VENV_PYTHON = os.path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
-_SUPPORTED_PYTHON = (3, 12)
-
-
-def _ensure_supported_python():
-    """Fail fast when the launcher is run with an unsupported interpreter."""
-    if sys.version_info[:2] != _SUPPORTED_PYTHON:
-        print('\n' + '=' * 60)
-        print('UNSUPPORTED PYTHON VERSION')
-        print('=' * 60)
-        print(f'  Current: Python {sys.version_info.major}.{sys.version_info.minor}')
-        print(f'  Required: Python {_SUPPORTED_PYTHON[0]}.{_SUPPORTED_PYTHON[1]}')
-        if os.path.isfile(_VENV_PYTHON):
-            print('\nUse the project virtual environment instead:')
-            print('  .venv\\Scripts\\activate')
-            print('  python launch.py --sim --task <task>')
-            print('\nOr run directly:')
-            print(f'  {_VENV_PYTHON} launch.py --sim --task <task>')
-        else:
-            print('\nCreate the virtual environment first (do NOT use plain python -m venv):')
-            print('  .\\setup_venv.ps1')
-            print('  or:  py -3.12 -m venv .venv  &&  .venv\\Scripts\\pip install -r requirements.txt')
-        print('=' * 60 + '\n')
-        return 1
-
-    try:
-        import numpy  # noqa: F401
-        import cv2  # noqa: F401
-    except ImportError as exc:
-        print('\n' + '=' * 60)
-        print('MISSING OR BROKEN DEPENDENCIES')
-        print('=' * 60)
-        print(f'  {exc}')
-        print('\nReinstall requirements in the project venv:')
-        print('  .venv\\Scripts\\activate')
-        print('  pip install -r requirements.txt')
-        print('=' * 60 + '\n')
-        return 1
-
-    return 0
-
-
-if _ensure_supported_python() != 0:
-    sys.exit(1)
-
 import requests
 
 from launcher.ports import find_available_port, wait_for_port_file
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
 
 GODOT_PROJECT = os.path.join(PROJECT_ROOT, 'GodotSimulation', 'ducky-bot')
 from launcher.config import GODOT_SCENES
@@ -366,6 +321,13 @@ def _bot_host(target):
     return target if target.replace('.', '').isdigit() else f"{target}.local"
 
 
+# Tasks that import code/models from other tasks; their files ship together.
+TASK_DEPENDENCIES = {
+    'passing': ['visual_lane_servoing', 'object_detection'],
+    'object_detection': ['visual_lane_servoing'],
+}
+
+
 def package_task(task_name):
     print(f"Packaging task: {task_name}")
     task_packages_dir = os.path.join(PROJECT_ROOT, 'tasks', task_name, 'packages')
@@ -380,22 +342,28 @@ def package_task(task_name):
             return None
         return tarinfo
 
-    task_models_dir = os.path.join(PROJECT_ROOT, 'tasks', task_name, 'models')
-    task_server_dir = os.path.join(PROJECT_ROOT, 'servers', task_name)
-
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-        print(f"   Adding packages: tasks/{task_name}/packages/")
-        tar.add(task_packages_dir, arcname=f'tasks/{task_name}/packages', filter=no_pycache)
+        for name in [task_name] + TASK_DEPENDENCIES.get(task_name, []):
+            packages_dir = os.path.join(PROJECT_ROOT, 'tasks', name, 'packages')
+            models_dir   = os.path.join(PROJECT_ROOT, 'tasks', name, 'models')
+            servers_dir  = os.path.join(PROJECT_ROOT, 'servers', name)
+            if os.path.exists(packages_dir):
+                print(f"   Adding packages: tasks/{name}/packages/")
+                tar.add(packages_dir, arcname=f'tasks/{name}/packages', filter=no_pycache)
+            if os.path.exists(models_dir):
+                print(f"   Adding models: tasks/{name}/models/")
+                tar.add(models_dir, arcname=f'tasks/{name}/models', filter=no_pycache)
+            if os.path.exists(servers_dir):
+                print(f"   Adding server: servers/{name}/")
+                tar.add(servers_dir, arcname=f'servers/{name}', filter=no_pycache)
+        templates_dir = os.path.join(PROJECT_ROOT, 'servers', 'templates')
+        if os.path.exists(templates_dir):
+            print(f"   Adding templates: servers/templates/")
+            tar.add(templates_dir, arcname='servers/templates', filter=no_pycache)
         if os.path.exists(config_dir):
             print(f"   Adding configs: config/")
             tar.add(config_dir, arcname='config', filter=no_pycache)
-        if os.path.exists(task_models_dir):
-            print(f"   Adding models: tasks/{task_name}/models/")
-            tar.add(task_models_dir, arcname=f'tasks/{task_name}/models', filter=no_pycache)
-        if os.path.exists(task_server_dir):
-            print(f"   Adding server: servers/{task_name}/")
-            tar.add(task_server_dir, arcname=f'servers/{task_name}', filter=no_pycache)
 
     buf.seek(0)
     print("Package created!")

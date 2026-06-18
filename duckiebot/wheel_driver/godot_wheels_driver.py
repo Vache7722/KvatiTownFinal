@@ -1,12 +1,11 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from math import fabs, floor, pi
+from math import fabs, floor
 import json
 import os
 import select
 import socket
 import struct
-import threading
 import time
 from typing import Optional, Callable
 
@@ -264,7 +263,6 @@ class GodotWheelsDriver(WheelsDriverAbs):
 
         self._executed_left: float1 = 0.0
         self._executed_right: float1 = 0.0
-        self.encoders = None  # no GPIO encoders in sim; agent uses game_state.distance_traveled
         self.set_wheels_speed(0.0, 0.0)
 
     @property
