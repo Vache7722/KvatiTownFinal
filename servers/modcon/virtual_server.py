@@ -246,7 +246,7 @@ def _drive_segment(side_length, stop_ev, timeout=15.0):
 
         speed = float(np.clip(error * 0.5, -0.3, 0.3))
         if 0.0 < abs(speed) < 0.15:
-            speed = 0.15 if error > 0 else 0.0
+            speed = 0.15 if error > 0 else -0.15
 
         if wheels:
             wheels.set_wheels_speed(speed, speed)
@@ -278,7 +278,7 @@ def run_straight(distance, stop_ev):
 
         speed = float(np.clip(error * 0.5, -0.3, 0.3))
         if 0.0 < abs(speed) < 0.15:
-            speed = 0.15 if error > 0 else 0.0
+            speed = 0.15 if error > 0 else -0.15
 
         if wheels:
             wheels.set_wheels_speed(speed, speed)

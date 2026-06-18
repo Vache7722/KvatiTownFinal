@@ -14,7 +14,10 @@ from flask import Flask, Response, render_template_string, jsonify, request
 
 from tasks.visual_lane_servoing.packages.agent import LaneServoingAgent
 from tasks.object_detection.packages.agent import ObjectDetectionAgent, CLASS_NAMES
-from tasks.object_detection.packages.stop_activity import should_stop as student_should_stop
+from tasks.object_detection.packages.stop_activity import (
+    should_stop as student_should_stop,
+    get_speed_multiplier as student_speed_multiplier,
+)
 from servers.object_detection.visualization import draw_detections
 from servers.templates.object_detection import OBJECT_DETECTION_TEMPLATE as HTML_TEMPLATE
 
@@ -105,6 +108,12 @@ def _should_stop(detections):
     return student_should_stop(detections, det_agent.img_size)
 
 
+def _speed_multiplier(detections):
+    if det_agent is None:
+        return 1.0
+    return student_speed_multiplier(detections, det_agent.img_size)
+
+
 def visualize(frame_rgb):
     global _stopped_by_det, _stop_reason
 
@@ -130,12 +139,13 @@ def visualize(frame_rgb):
     elif lane_agent is not None:
         pwm_left, pwm_right = lane_agent.compute_commands(frame_rgb)
 
-        should_stop_flag, reason = _should_stop(detections)
-        _stopped_by_det = should_stop_flag
-        _stop_reason    = reason
+        mult = _speed_multiplier(detections)
+        _, reason = _should_stop(detections)
+        _stopped_by_det = (mult == 0.0)
+        _stop_reason    = reason if _stopped_by_det else ''
 
-        if running and not should_stop_flag and not wheels.is_game_over():
-            wheels.set_wheels_speed(pwm_left, pwm_right)
+        if running and not wheels.is_game_over():
+            wheels.set_wheels_speed(pwm_left * mult, pwm_right * mult)
         else:
             wheels.set_wheels_speed(0.0, 0.0)
 

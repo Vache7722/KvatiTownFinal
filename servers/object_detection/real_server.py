@@ -15,7 +15,10 @@ from flask import Flask, Response, render_template_string, jsonify, request
 
 from tasks.visual_lane_servoing.packages.agent import LaneServoingAgent
 from tasks.object_detection.packages.agent import ObjectDetectionAgent, CLASS_NAMES
-from tasks.object_detection.packages.stop_activity import should_stop as student_should_stop
+from tasks.object_detection.packages.stop_activity import (
+    should_stop as student_should_stop,
+    get_speed_multiplier as student_speed_multiplier,
+)
 from servers.object_detection.visualization import draw_detections, draw_status_overlay
 from servers.templates.object_detection import OBJECT_DETECTION_TEMPLATE as HTML_TEMPLATE
 
@@ -95,8 +98,12 @@ def detection_loop():
                 _last_detections = result
 
 
-def _should_stop(detections, frame_h: int):
-    return student_should_stop(detections, frame_h)
+def _should_stop(detections, img_size: int):
+    return student_should_stop(detections, img_size)
+
+
+def _speed_multiplier(detections, img_size: int) -> float:
+    return student_speed_multiplier(detections, img_size)
 
 
 def visualize(frame_bgr):
@@ -124,12 +131,14 @@ def visualize(frame_bgr):
     elif lane_agent is not None:
         pwm_left, pwm_right = lane_agent.compute_commands(frame_rgb)
 
-        should_stop, reason = _should_stop(detections, det_agent.img_size if det_agent else frame_bgr.shape[0])
-        _stopped_by_det = should_stop
-        _stop_reason    = reason
+        _img_size = det_agent.img_size if det_agent else frame_bgr.shape[0]
+        mult = _speed_multiplier(detections, _img_size)
+        _, reason = _should_stop(detections, _img_size)
+        _stopped_by_det = (mult == 0.0)
+        _stop_reason    = reason if _stopped_by_det else ''
 
-        if running and not should_stop:
-            wheels.set_wheels_speed(pwm_left, pwm_right)
+        if running:
+            wheels.set_wheels_speed(pwm_left * mult, pwm_right * mult)
         else:
             wheels.set_wheels_speed(0.0, 0.0)
 

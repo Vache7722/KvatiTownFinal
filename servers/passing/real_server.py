@@ -1,5 +1,6 @@
 import sys
 import os
+import signal
 import threading
 import time
 import queue
@@ -13,13 +14,16 @@ import cv2
 from flask import Flask, Response, render_template_string, jsonify, request
 
 from tasks.passing.packages.agent import PassingAgent
-from tasks.passing.packages.color_detector import ColorFallbackDetector
+from tasks.passing.packages.color_detector import (
+    ColorFallbackDetector, REAL_LOWER, REAL_UPPER,
+)
 from tasks.object_detection.packages.agent import ObjectDetectionAgent, CLASS_NAMES
 from servers.passing.visualization import draw_detections, draw_passing_overlay
+from servers.object_detection.visualization import draw_status_overlay
 from servers.templates.passing import PASSING_TEMPLATE as HTML_TEMPLATE
 
-from duckiebot.camera_driver.godot_camera_driver import GodotCameraDriver, GodotCameraConfig
-from duckiebot.wheel_driver.godot_wheels_driver import GodotWheelsDriver
+from duckiebot.camera_driver import CameraDriver
+from duckiebot.wheel_driver import DaguWheelsDriver
 from duckiebot.wheel_driver.wheels_driver_abs import WheelPWMConfiguration
 from launcher.ports import find_available_port
 from servers.common import make_frame_generator, shutdown_cleanup, suppress_http_logs
@@ -43,25 +47,6 @@ _last_frame_ts   = 0.0
 keys_pressed      = {'up': False, 'down': False, 'left': False, 'right': False}
 _keys_lock        = threading.Lock()
 _keys_last_update = time.time()
-
-
-def detection_loop():
-    global _last_detections
-    while not stop_event.is_set():
-        if det_agent is None and fallback_det is None:
-            time.sleep(0.1)
-            continue
-        try:
-            frame_rgb = _frame_queue.get(timeout=0.5)
-        except queue.Empty:
-            continue
-        if det_agent is not None and det_agent.model_loaded:
-            result = det_agent.detect(frame_rgb)
-        else:
-            result = fallback_det.detect(frame_rgb)
-        if result is not None:
-            with _detection_lock:
-                _last_detections = result
 
 
 def manual_control_loop():
@@ -93,15 +78,35 @@ def manual_control_loop():
         elif kc['right']:
             left, right = 0.3, -0.3
 
-        if not wheels.is_game_over():
-            wheels.set_wheels_speed(left, right)
-
+        wheels.set_wheels_speed(left, right)
         time.sleep(0.05)
 
 
+def detection_loop():
+    global _last_detections
+    while not stop_event.is_set():
+        if det_agent is None and fallback_det is None:
+            time.sleep(0.1)
+            continue
+        try:
+            frame_rgb = _frame_queue.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        if det_agent is not None and det_agent.model_loaded:
+            result = det_agent.detect(frame_rgb)
+        elif fallback_det is not None:
+            result = fallback_det.detect(frame_rgb)
+        else:
+            time.sleep(0.1)
+            continue
+        if result is not None:
+            with _detection_lock:
+                _last_detections = result
+
+
 def frame_watchdog():
-    """Stop the wheels if frame processing stalls — otherwise the last
-    command stays latched in Godot and the bot drives blind."""
+    """Stop the wheels if frame processing stalls (e.g. camera dropout) —
+    otherwise the last command stays latched and the bot drives blind."""
     while not stop_event.is_set():
         time.sleep(0.2)
         if (wheels is not None and not manual_mode
@@ -109,17 +114,18 @@ def frame_watchdog():
             wheels.set_wheels_speed(0.0, 0.0)
 
 
-def visualize(frame_rgb):
+def visualize(frame_bgr):
     global _last_frame_ts
     _last_frame_ts = time.monotonic()
-    bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-
     if wheels is None or passing_agent is None:
-        return bgr
+        return draw_status_overlay(frame_bgr, 'Initializing...')
 
-    if det_agent is not None:
-        small = cv2.resize(frame_rgb, (det_agent.img_size, det_agent.img_size))
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+    if (det_agent is not None and det_agent.model_loaded) or fallback_det is not None:
         try:
+            img_size = det_agent.img_size if det_agent else fallback_det.img_size
+            small = cv2.resize(frame_rgb, (img_size, img_size))
             _frame_queue.put_nowait(small)
         except queue.Full:
             pass
@@ -130,31 +136,33 @@ def visualize(frame_rgb):
     if not manual_mode:
         # Only step the agent while driving — otherwise the state machine
         # would run through the maneuver with the wheels disabled.
-        if running and not wheels.is_game_over():
-            img_size = det_agent.img_size if det_agent else 416
+        if running:
+            img_size = det_agent.img_size if det_agent else frame_bgr.shape[0]
             pwm_left, pwm_right = passing_agent.compute_commands(frame_rgb, detections, img_size)
             wheels.set_wheels_speed(pwm_left, pwm_right)
         else:
             wheels.set_wheels_speed(0.0, 0.0)
 
-    if det_agent is not None and detections:
-        oh, ow = bgr.shape[:2]
-        sx = ow / det_agent.img_size
-        sy = oh / det_agent.img_size
+    if detections and (fallback_det is not None
+                       or (det_agent is not None and det_agent.model_loaded)):
+        oh, ow = frame_bgr.shape[:2]
+        img_size = det_agent.img_size if det_agent else fallback_det.img_size
+        sx = ow / img_size
+        sy = oh / img_size
         scaled = [((int(x1*sx), int(y1*sy), int(x2*sx), int(y2*sy)), s, c)
                   for (x1, y1, x2, y2), s, c in detections]
-        draw_detections(bgr, scaled)
+        draw_detections(frame_bgr, scaled)
 
-    draw_passing_overlay(bgr, passing_agent.status())
-    return bgr
+    draw_passing_overlay(frame_bgr, passing_agent.status())
+    return frame_bgr
 
 
-generate_frames = make_frame_generator(lambda: camera, visualize, quality=50)
+generate_frames = make_frame_generator(lambda: camera, visualize, quality=50, rgb=False)
 
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, hostname=socket.gethostname(), virtual=True)
+    return render_template_string(HTML_TEMPLATE, hostname=socket.gethostname(), virtual=False)
 
 @app.route('/video')
 def video():
@@ -176,17 +184,6 @@ def stop():
         wheels.set_wheels_speed(0.0, 0.0)
     return jsonify({'status': 'stopped'})
 
-@app.route('/reset', methods=['POST'])
-def reset():
-    global running, passing_agent, _last_detections
-    if wheels:
-        wheels.reset_game()
-    passing_agent = PassingAgent()
-    running = True
-    with _detection_lock:
-        _last_detections = []
-    return jsonify({'status': 'reset', 'running': running})
-
 @app.route('/set_mode', methods=['POST'])
 def set_mode():
     global manual_mode
@@ -206,16 +203,6 @@ def update_keys():
     _keys_last_update = time.time()
     return jsonify({'status': 'ok'})
 
-@app.route('/remove_objects', methods=['POST'])
-def remove_objects():
-    global _last_detections
-    name_filter = request.json.get('filter', '') if request.json else ''
-    if wheels and name_filter:
-        wheels.remove_objects(name_filter)
-    with _detection_lock:
-        _last_detections = []
-    return jsonify({'status': 'ok', 'filter': name_filter})
-
 @app.route('/set_threshold', methods=['POST'])
 def set_threshold():
     value = request.json.get('value') if request.json else None
@@ -230,7 +217,6 @@ def status():
     payload = {
         'running':        running,
         'manual_mode':    manual_mode,
-        'game_over':      wheels.is_game_over() if wheels else False,
         'model_loaded':   det_agent.model_loaded if det_agent else False,
         'detector':       ('onnx' if det_agent and det_agent.model_loaded
                            else 'color_fallback' if fallback_det else 'none'),
@@ -248,14 +234,11 @@ def status():
 
 
 def main():
-    global passing_agent, det_agent, fallback_det, camera, wheels
+    global passing_agent, det_agent, camera, wheels
 
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument('--port',       type=int, default=5000)
-    ap.add_argument('--frame-port', type=int, default=5001)
-    ap.add_argument('--wheel-port', type=int, default=5002)
-    ap.add_argument('--godot-host', type=str, default='localhost')
+    ap.add_argument('--port', type=int, default=5000)
     args = ap.parse_args()
 
     suppress_http_logs()
@@ -263,47 +246,55 @@ def main():
     print('PASSING — OVERTAKE OBSTACLES & MEASURE THEIR SPEED')
     print('=' * 60)
 
-    # The shipped HSV config is tuned for the real track (dim indoor white).
-    # In the sim those loose bounds match the parked duckiebot's pale rear
-    # plate dead ahead and steer the lane follower off the road — pin the
-    # sim-proven strict bounds instead.
-    from tasks.visual_lane_servoing.packages.visual_servoing_activity import set_hsv_bounds
-    set_hsv_bounds((20, 100, 100), (35, 255, 255), (0, 0, 200), (179, 60, 255))
+    def _init_wheels():
+        global wheels
+        wheels = DaguWheelsDriver(WheelPWMConfiguration(), WheelPWMConfiguration())
+        print('[Init] Wheels ready')
 
-    print('\n[1/4] Creating passing agent...')
-    passing_agent = PassingAgent()
+    def _init_camera():
+        global camera
+        cam = CameraDriver()
+        cam.start()
+        camera = cam
+        print('[Init] Camera ready')
 
-    print('\n[2/4] Loading detection model...')
-    det_agent = ObjectDetectionAgent()
-    if det_agent.model_loaded:
-        print(f'  Model ready: {det_agent.img_size}px')
-    else:
-        print(f'  WARNING: {det_agent.load_error}')
-        print('  Using color-based fallback detector (sim only).')
-        fallback_det = ColorFallbackDetector(det_agent.img_size)
+    def _init_agents():
+        global passing_agent, det_agent, fallback_det
+        passing_agent = PassingAgent()
+        print('[Init] Passing agent ready')
+        det_agent = ObjectDetectionAgent()
+        if det_agent.model_loaded:
+            print(f'[Init] Detection model ready ({det_agent.img_size}px)')
+        else:
+            print(f'[Init] Detection model: {det_agent.load_error}')
+            print('[Init] Using color fallback (blue chassis). A trained '
+                  'best.onnx in tasks/object_detection/models/ is preferred.')
+            fallback_det = ColorFallbackDetector(det_agent.img_size,
+                                                 lower=REAL_LOWER,
+                                                 upper=REAL_UPPER)
 
-    print('\n[3/4] Initializing wheels...')
-    wheels = GodotWheelsDriver(
-        WheelPWMConfiguration(pwm_min=0), WheelPWMConfiguration(pwm_min=0),
-        godot_host=args.godot_host, godot_port=args.wheel_port,
-    )
-
-    print('\n[4/4] Initializing camera...')
-    camera = GodotCameraDriver(godot_config=GodotCameraConfig(host='0.0.0.0', port=args.frame_port))
-    camera.start()
-
+    threading.Thread(target=_init_wheels,        daemon=True).start()
+    threading.Thread(target=_init_camera,        daemon=True).start()
+    threading.Thread(target=_init_agents,        daemon=True).start()
     threading.Thread(target=detection_loop,      daemon=True).start()
     threading.Thread(target=manual_control_loop, daemon=True).start()
     threading.Thread(target=frame_watchdog,      daemon=True).start()
 
+    def _shutdown(signum, frame):
+        shutdown_cleanup(wheels, camera, stop_event)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT,  _shutdown)
+
     web_port = find_available_port(args.port)
-    print(f'\nWeb Interface: http://localhost:{web_port}')
+    print(f'\nWeb Interface: http://{socket.gethostname()}.local:{web_port}')
     print('=' * 60 + '\n')
 
     try:
-        app.run(host='127.0.0.1', port=web_port, debug=False, threaded=True)
-    except KeyboardInterrupt:
-        print('\nShutting down...')
+        app.run(host='0.0.0.0', port=web_port, debug=False, threaded=True)
+    except (KeyboardInterrupt, SystemExit):
+        pass
     finally:
         shutdown_cleanup(wheels, camera, stop_event)
 
