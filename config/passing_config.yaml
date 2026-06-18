@@ -1,0 +1,66 @@
+# Passing task configuration.
+# Detection thresholds are fractions of the detector's square img_size.
+
+# --- obstacle triggers ---
+approach_y2: 0.30        # bbox bottom past this -> slow down and measure
+pullout_y2: 0.42         # bbox bottom past this -> commit to the pass
+emergency_y2: 0.55       # full stop safety net (only while lane following)
+lane_min_x: 0.32         # detections left of this are opposing lane -> ignored
+lane_min_x_close: 0.18   # the lane window widens as the obstacle gets closer
+oncoming_min_x: 0.05     # oncoming-traffic guard: no pull-out while the
+                         # opposing lane ahead is occupied
+lane_max_x: 0.95
+emergency_min_x: 0.10    # emergency stop watches a wider window than the triggers
+straight_cmd_diff: 0.12  # only pull out when lane steering is this straight
+pullout_force_timeout: 6.0  # overrides steering jitter only, never the curve gate
+max_commit_distance: 0.45   # trail closer than this before starting a pass
+                            # (estimator distance; ~0.6 m physical)
+commit_cx_min: 0.42         # target must be centered in view at commit time —
+commit_cx_max: 0.72         # a sideways-drifting target is cornering ahead
+
+# --- curve detection (passing is deferred on curves) ---
+curve_line_shift: 0.27   # lane line near/far x-shift (fraction of frame width).
+                         # Straight lines converge by perspective too; only a
+                         # much larger shift means an actual curve (~350px/1280).
+curve_steer_mean: 0.12   # rolling mean |left-right| above this means curving
+curve_clear_frames: 12   # consecutive straight frames needed to clear the flag
+long_straight_frames: 40 # sustained straight needed before passing a MOVING
+                         # target (it is invisible alongside, so the whole
+                         # maneuver must fit before the next corner)
+
+# --- approach / measurement ---
+approach_speed_scale: 0.75 # slow down immediately when APPROACH begins
+follow_speed_scale: 0.40 # slowest speed multiplier while trailing the obstacle
+measure_timeout: 3.0     # seconds to wait for a confident speed estimate
+
+# --- lane-change S-curves (open loop) ---
+# Each maneuver is two phases of *_time seconds: arc out, counter-arc to
+# straighten. Gentler is better: steer 0.20 at speed 0.22 (0.1 m baseline)
+# ~= 0.88 rad/s yaw, still ~0.2 m of lateral shift per S-curve.
+pull_out_time: 1.05
+pull_out_steer: 0.20
+merge_time: 1.00
+merge_steer: 0.16
+maneuver_speed: 0.22
+moving_pass_boost: 1.35  # passing-speed multiplier when the target moves
+
+# --- passing in the opposing lane ---
+pass_clear_len: 0.25     # extra meters past the obstacle before merging back
+moving_extra_clear: 0.30 # additional margin for moving targets
+pass_min_time: 1.2
+pass_max_time: 8.0
+convoy_speed_assumption: 0.12  # assumed speed of a second vehicle found queued
+                               # behind the pass target (it can't be measured)
+clear_frames: 4          # consecutive obstacle-free frames required before merging
+repass_time: 3.5         # extra passing seconds after an aborted merge
+min_rel_speed: 0.04
+
+# --- speed estimation ---
+speed_gain: 1.0          # m/s of real speed per unit wheel command
+                         # sim: 1.0 (Godot max_speed). Real bot: from modcon calibration.
+camera_vfov_deg: 75.0    # vertical FOV (sim camera default; real camera ~from calibration)
+obstacle_height_m: 0.18  # effective bbox height of a duckiebot in meters.
+                         # Calibrated for the sim color-fallback boxes; with a trained
+                         # YOLO model recalibrate: dist_true * bbox_h_px / focal_py.
+stationary_speed_thresh: 0.02  # eager: misjudging parked-as-moving is harmless,
+                               # the reverse causes collisions

@@ -1,12 +1,16 @@
+# HSV bounds for lane-marking detection (OpenCV ranges: H 0-179, S/V 0-255).
+# These work on the sim track and the real mat: real yellow dashes lean
+# orange (lower hue), and the real white edge line is dimmer indoors than
+# the sim's, so the V floor is low and shadows still count.
 yellow_lower_h: 15
-yellow_lower_s: 80
-yellow_lower_v: 80
-yellow_upper_h: 35
+yellow_lower_s: 70
+yellow_lower_v: 90
+yellow_upper_h: 40
 yellow_upper_s: 255
 yellow_upper_v: 255
 white_lower_h: 0
 white_lower_s: 0
-white_lower_v: 170
+white_lower_v: 150
 white_upper_h: 179
-white_upper_s: 40
+white_upper_s: 80
 white_upper_v: 255
