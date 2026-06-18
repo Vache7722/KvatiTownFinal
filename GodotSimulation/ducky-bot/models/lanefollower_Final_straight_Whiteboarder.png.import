@@ -2,17 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://choh72qmylojb"
-path.s3tc="res://.godot/imported/CircularRoad_Final_curve.png-5661f5d9a55a6ebbbd4f0bec197e940c.s3tc.ctex"
+uid="uid://dso32rahaeu6b"
+path.s3tc="res://.godot/imported/lanefollower_Final_straight_Whiteboarder.png-a5eb97b9ba26472a3b89b0c70bf3e36f.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
+generator_parameters={
+"md5": "f61bc10766c6c57e05ca6b2461fb067c"
+}
 
 [deps]
 
-source_file="res://textures/CircularRoad_Final_curve.png"
-dest_files=["res://.godot/imported/CircularRoad_Final_curve.png-5661f5d9a55a6ebbbd4f0bec197e940c.s3tc.ctex"]
+source_file="res://models/lanefollower_Final_straight_Whiteboarder.png"
+dest_files=["res://.godot/imported/lanefollower_Final_straight_Whiteboarder.png-a5eb97b9ba26472a3b89b0c70bf3e36f.s3tc.ctex"]
 
 [params]
 
